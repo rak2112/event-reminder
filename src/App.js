@@ -3,12 +3,12 @@ import { Calendar, Users, Plus, Image, CheckCircle, Clock, Bell, Search, LogOut 
 
 // IMPORTANT: Replace this with YOUR Firebase config from Firebase Console
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDuqF-1gwu4MoqyfwEfETa2Vlp4NJd6XiU",
-  authDomain: "family-hub-b3954.firebaseapp.com",
-  projectId: "family-hub-b3954",
-  storageBucket: "family-hub-b3954.firebasestorage.app",
-  messagingSenderId: "712003985425",
-  appId: "1:712003985425:web:17eb7166a3770264c551b0"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
 
 const FamilyHubPWA = () => {
@@ -51,6 +51,10 @@ const FamilyHubPWA = () => {
           setLoading(false);
           return;
         }
+
+        const firebaseApp = await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
+        const firebaseAuth = await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js');
+        const firebaseFirestore = await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js');
 
         if (!window.firebase.apps.length) {
           window.firebase.initializeApp(FIREBASE_CONFIG);
