@@ -95,11 +95,11 @@ export const parseEventFromText = (extractedText) => {
   }
 
   const lines = extractedText.split('\n').filter(line => line.trim());
-  
+
   // Extract date and time
   const date = extractDate(extractedText);
   const time = extractTime(extractedText);
-  
+
   // Determine priority from text (look for keywords)
   let priority = 'medium';
   const lowerText = extractedText.toLowerCase();
@@ -108,13 +108,13 @@ export const parseEventFromText = (extractedText) => {
   } else if (lowerText.includes('low') || lowerText.includes('optional')) {
     priority = 'low';
   }
-  
+
   // Determine type (event vs reminder)
   let type = 'event';
   if (lowerText.includes('reminder') || lowerText.includes('remember')) {
     type = 'reminder';
   }
-  
+
   return {
     title: lines[0] || '',
     description: lines.slice(1, 3).join(' ').trim() || '',

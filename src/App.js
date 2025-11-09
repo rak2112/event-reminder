@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, Plus, Image, CheckCircle, Clock, Tag, Bell, Search, Filter, LogOut, LogIn } from 'lucide-react';
+import { Calendar, Users, Plus, Image, CheckCircle, Clock, Bell, Search, LogOut } from 'lucide-react';
 
 // IMPORTANT: Replace this with YOUR Firebase config from Firebase Console
 const FIREBASE_CONFIG = {
@@ -51,10 +51,6 @@ const FamilyHubPWA = () => {
           setLoading(false);
           return;
         }
-
-        const firebaseApp = await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
-        const firebaseAuth = await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js');
-        const firebaseFirestore = await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js');
 
         if (!window.firebase.apps.length) {
           window.firebase.initializeApp(FIREBASE_CONFIG);
