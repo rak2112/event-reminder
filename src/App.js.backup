@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Bell, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calendar, Bell } from 'lucide-react';
 
 // Components
 import LoadingScreen from './components/LoadingScreen';
@@ -15,12 +15,8 @@ import SettingsModal from './components/SettingsModal';
 import ImageUploadModal from './components/ImageUploadModal';
 import SyncPanel from './components/SyncPanel';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
-import DashboardHeader from './components/DashboardHeader';
-import WeeklyCalendarView from './components/WeeklyCalendarView';
-import RemindersSection from './components/RemindersSection';
 import { CardSkeleton } from './components/ui/Loader';
 import { useToast } from './components/ui/Toast';
-import Button from './components/ui/Button';
 
 // Services
 import { fetchCalendarEvents, syncCalendarToFirestore } from './services/googleCalendar';
@@ -69,7 +65,6 @@ const FamilyHubPWA = () => {
   const [completingIds, setCompletingIds] = useState(new Set());
   const [deletingIds, setDeletingIds] = useState(new Set());
   const [isUploading, setIsUploading] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // UI State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -79,7 +74,6 @@ const FamilyHubPWA = () => {
   const [selectedMember, setSelectedMember] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingMembers, setEditingMembers] = useState([]);
-  const [isListSectionExpanded, setIsListSectionExpanded] = useState(true);
 
   // New Features State
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -120,14 +114,6 @@ const FamilyHubPWA = () => {
         await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js');
         await loadScript('https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js');
 
-        // Wait a bit for Firebase modules to be fully available
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Verify Firebase is available
-        if (!window.firebase || !window.firebase.firestore) {
-          throw new Error('Firebase modules not loaded properly');
-        }
-
         if (!window.firebase.apps.length) {
           window.firebase.initializeApp(FIREBASE_CONFIG);
         }
@@ -146,49 +132,15 @@ const FamilyHubPWA = () => {
             setDataLoading(false);
           }
         });
-
-        // Initialize Service Worker (non-blocking)
-        registerServiceWorker().catch(err => {
-          console.log('Service Worker registration skipped:', err.message);
-        });
       } catch (error) {
         console.error('Firebase initialization error:', error);
-        // Only show error toast if initialization truly failed after retries
-        setTimeout(() => {
-          if (!firebaseInitialized) {
-            showToast('Failed to initialize app. Please check your connection and refresh.', 'error');
-          }
-        }, 4000);
+        showToast('Failed to initialize app. Please refresh.', 'error');
         setLoading(false);
       }
     };
 
     initFirebase();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Check notification permission on mount
-  useEffect(() => {
-    if ('Notification' in window) {
-      setNotificationsEnabled(Notification.permission === 'granted');
-    }
-  }, []);
-
-  // Check notifications periodically
-  useEffect(() => {
-    if (!user || !db) return;
-
-    const checkNotifications = async () => {
-      await checkAndSendNotifications(user.uid, db);
-    };
-
-    // Check immediately
-    checkNotifications();
-
-    // Check every hour
-    const interval = setInterval(checkNotifications, 60 * 60 * 1000);
-
-    return () => clearInterval(interval);
-  }, [user, db]);
 
   // Load Family Members
   useEffect(() => {
@@ -231,39 +183,26 @@ const FamilyHubPWA = () => {
       .collection('events')
       .where('userId', '==', user.uid)
       .orderBy('createdAt', 'desc')
-      .onSnapshot(
-        (snapshot) => {
-          const eventsData = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          }));
-          setEvents(eventsData);
-          setDataLoading(false);
-        },
-        (error) => {
-          console.error('Error loading events:', error);
-          setDataLoading(false);
-          // Don't show error toast - data is still loading in background
-        }
-      );
+      .onSnapshot((snapshot) => {
+        const eventsData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setEvents(eventsData);
+        setDataLoading(false);
+      });
 
     const unsubscribeReminders = db
       .collection('reminders')
       .where('userId', '==', user.uid)
       .orderBy('createdAt', 'desc')
-      .onSnapshot(
-        (snapshot) => {
-          const remindersData = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          }));
-          setReminders(remindersData);
-        },
-        (error) => {
-          console.error('Error loading reminders:', error);
-          // Don't show error toast - data is still loading in background
-        }
-      );
+      .onSnapshot((snapshot) => {
+        const remindersData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setReminders(remindersData);
+      });
 
     return () => {
       unsubscribeEvents();
@@ -271,62 +210,17 @@ const FamilyHubPWA = () => {
     };
   }, [firebaseInitialized, user, db]);
 
-  // AUTH HANDLERS
+  // Handlers
   const handleGoogleSignIn = async () => {
     if (!auth) return;
     setIsSigningIn(true);
     try {
       const provider = new window.firebase.auth.GoogleAuthProvider();
-      // Add scopes for calendar and gmail
-      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-      provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
-
-      const result = await auth.signInWithPopup(provider);
-      const credential = window.firebase.auth.GoogleAuthProvider.credentialFromResult(result);
-
-      if (credential && credential.accessToken) {
-        setGoogleAccessToken(credential.accessToken);
-        showToast('Successfully signed in with Calendar & Gmail access!', 'success');
-      } else {
-        // Fallback: use the user's ID token
-        const token = await result.user.getIdToken();
-        setGoogleAccessToken(token);
-        showToast('Successfully signed in!', 'success');
-      }
+      await auth.signInWithPopup(provider);
+      showToast('Successfully signed in!', 'success');
     } catch (error) {
       console.error('Sign in error:', error);
       showToast('Sign in failed: ' + error.message, 'error');
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
-
-  const handleEmailSignIn = async (email, password) => {
-    if (!auth) return;
-    setIsSigningIn(true);
-    try {
-      await auth.signInWithEmailAndPassword(email, password);
-      showToast('Successfully signed in!', 'success');
-    } catch (error) {
-      console.error('Email sign in error:', error);
-      showToast(error.message, 'error');
-      throw error;
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
-
-  const handleEmailSignUp = async (email, password) => {
-    if (!auth) return;
-    setIsSigningIn(true);
-    try {
-      await auth.createUserWithEmailAndPassword(email, password);
-      showToast('Account created successfully!', 'success');
-    } catch (error) {
-      console.error('Email sign up error:', error);
-      showToast(error.message, 'error');
-      throw error;
     } finally {
       setIsSigningIn(false);
     }
@@ -336,7 +230,6 @@ const FamilyHubPWA = () => {
     if (!auth) return;
     try {
       await auth.signOut();
-      setGoogleAccessToken(null);
       showToast('Successfully signed out', 'info');
     } catch (error) {
       console.error('Sign out error:', error);
@@ -344,146 +237,6 @@ const FamilyHubPWA = () => {
     }
   };
 
-  // SYNC HANDLERS
-  const handleConnectGoogle = async () => {
-    return new Promise((resolve, reject) => {
-      // Load Google Identity Services
-      const script = document.createElement('script');
-      script.src = 'https://accounts.google.com/gsi/client';
-
-      if (document.querySelector('script[src="https://accounts.google.com/gsi/client"]')) {
-        // Already loaded
-        requestToken();
-        return;
-      }
-
-      script.onload = () => requestToken();
-      script.onerror = () => reject(new Error('Failed to load Google Identity Services'));
-      document.head.appendChild(script);
-
-      function requestToken() {
-        if (!window.google?.accounts?.oauth2) {
-          reject(new Error('Google Identity Services not available'));
-          return;
-        }
-
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
-          scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly',
-          callback: (response) => {
-            if (response.error) {
-              showToast('Failed to connect: ' + response.error, 'error');
-              reject(new Error(response.error));
-              return;
-            }
-
-            setGoogleAccessToken(response.access_token);
-            console.log('Google access token obtained!');
-            showToast('Google account connected successfully!', 'success');
-            resolve(response.access_token);
-          },
-        });
-
-        client.requestAccessToken();
-      }
-    });
-  };
-
-  const handleSyncCalendar = async () => {
-    if (!db || !user) {
-      showToast('Please sign in first', 'error');
-      return;
-    }
-
-    setIsSyncing(true);
-    try {
-      // Auto-request Google permissions if not connected
-      let token = googleAccessToken;
-      if (!token) {
-        console.log('No access token, requesting Google permissions...');
-        token = await handleConnectGoogle();
-      }
-
-      const calendarEvents = await fetchCalendarEvents(token);
-      const synced = await syncCalendarToFirestore(calendarEvents, user.uid, db, familyMembers);
-
-      if (synced.length > 0) {
-        showToast(`Synced ${synced.length} events from Google Calendar!`, 'success');
-      } else {
-        showToast('No new events to sync', 'info');
-      }
-
-      return synced;
-    } catch (error) {
-      console.error('Calendar sync error:', error);
-      showToast('Failed to sync calendar: ' + error.message, 'error');
-      throw error;
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleSyncGmail = async () => {
-    if (!db || !user) {
-      showToast('Please sign in first', 'error');
-      return;
-    }
-
-    setIsSyncing(true);
-    try {
-      // Auto-request Google permissions if not connected
-      let token = googleAccessToken;
-      if (!token) {
-        console.log('No access token, requesting Google permissions...');
-        token = await handleConnectGoogle();
-      }
-
-      const extractedEvents = await extractEventsFromEmails(token);
-      const synced = await syncGmailEventsToFirestore(extractedEvents, user.uid, db, familyMembers);
-
-      if (synced.length > 0) {
-        showToast(`Extracted ${synced.length} events from Gmail!`, 'success');
-      } else {
-        showToast('No new events found in emails', 'info');
-      }
-
-      return synced;
-    } catch (error) {
-      console.error('Gmail sync error:', error);
-      showToast('Failed to extract events from Gmail: ' + error.message, 'error');
-      throw error;
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleEnableNotifications = async () => {
-    try {
-      const granted = await requestNotificationPermission();
-
-      if (granted) {
-        setNotificationsEnabled(true);
-        showToast('Notifications enabled successfully!', 'success');
-
-        // Schedule notifications for existing events
-        for (const event of events) {
-          if (event.date && !event.completed) {
-            await scheduleEventNotifications(event, user.uid, db);
-          }
-        }
-      } else {
-        showToast('Notification permission denied', 'error');
-      }
-
-      return granted;
-    } catch (error) {
-      console.error('Notification permission error:', error);
-      showToast('Failed to enable notifications', 'error');
-      return false;
-    }
-  };
-
-  // EVENT HANDLERS
   const handleAddItem = async () => {
     if (!newEvent.title || !newEvent.member || !user || !db) return;
 
@@ -496,22 +249,12 @@ const FamilyHubPWA = () => {
     };
 
     try {
-      let docRef;
       if (newEvent.type === 'event') {
-        docRef = await db.collection('events').add(item);
+        await db.collection('events').add(item);
         showToast('Event added successfully!', 'success');
       } else {
-        docRef = await db.collection('reminders').add(item);
+        await db.collection('reminders').add(item);
         showToast('Reminder added successfully!', 'success');
-      }
-
-      // Schedule notifications if enabled and has date
-      if (notificationsEnabled && newEvent.date) {
-        await scheduleEventNotifications(
-          { ...item, id: docRef.id },
-          user.uid,
-          db
-        );
       }
 
       setNewEvent({
@@ -581,7 +324,6 @@ const FamilyHubPWA = () => {
     }
   };
 
-  // SETTINGS HANDLERS
   const openSettings = () => {
     setEditingMembers([...familyMembers]);
     setShowSettingsModal(true);
@@ -635,7 +377,6 @@ const FamilyHubPWA = () => {
     }
   };
 
-  // IMAGE UPLOAD HANDLER
   const handleImageUpload = async (file) => {
     if (!file) return;
 
@@ -727,7 +468,6 @@ const FamilyHubPWA = () => {
     return '';
   };
 
-  // HELPER FUNCTIONS
   const getMemberColor = (memberId) => {
     const member = familyMembers.find((m) => m.id === parseInt(memberId));
     return member ? member.color : '#6B7280';
@@ -760,20 +500,19 @@ const FamilyHubPWA = () => {
     });
   };
 
-  // RENDER LOGIC
+  // Render Loading Screen
   if (loading) {
     return <LoadingScreen message="Initializing Family Hub..." />;
   }
 
+  // Render Auth Screen
   if (!user) {
     return (
       <>
-        <UnifiedAuthScreen
-          onGoogleSignIn={handleGoogleSignIn}
-          onEmailSignIn={handleEmailSignIn}
-          onEmailSignUp={handleEmailSignUp}
+        <AuthScreen
+          onSignIn={handleGoogleSignIn}
           firebaseInitialized={firebaseInitialized}
-          isLoading={isSigningIn}
+          isSigningIn={isSigningIn}
         />
         {ToastComponent}
       </>
@@ -783,8 +522,9 @@ const FamilyHubPWA = () => {
   const filteredEvents = filterItems(events);
   const filteredReminders = filterItems(reminders);
 
+  // Render Main App
   return (
-    <div className="min-h-screen bg-[#0a0a0f]">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
       <Header
         user={user}
         onSettingsClick={openSettings}
@@ -794,17 +534,22 @@ const FamilyHubPWA = () => {
       />
 
       <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        {/* Sync Button */}
-        <div className="mb-4 flex justify-end">
-          <Button
-            variant="gradient"
-            size="sm"
-            onClick={() => setShowSyncPanel(true)}
-          >
-            🔄 Sync & Integrations
-          </Button>
-        </div>
+        <SearchBar
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          selectedMember={selectedMember}
+          onMemberSelect={setSelectedMember}
+          familyMembers={familyMembers}
+        />
 
+        <TabNavigation
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          eventCount={filteredEvents.length}
+          reminderCount={filteredReminders.length}
+        />
+
+        {/* Content */}
         {dataLoading ? (
           <div className="space-y-4">
             <CardSkeleton />
@@ -812,112 +557,56 @@ const FamilyHubPWA = () => {
             <CardSkeleton />
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left Column */}
-            <div className="space-y-6">
-              <DashboardHeader
-                events={events}
-                onAddEvent={() => setShowAddModal(true)}
-              />
-
-              <RemindersSection
-                reminders={reminders}
-                onReminderClick={() => {
-                  // Handle reminder click if needed
-                }}
-              />
-            </div>
-
-            {/* Right Column */}
-            <div className="space-y-6">
-              <WeeklyCalendarView events={events} />
-
-              {/* Legacy view for backward compatibility */}
-              <div className="bg-[#1a1a2e] rounded-3xl p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-white text-xl font-bold">All Items</h2>
-                  <button
-                    onClick={() => setIsListSectionExpanded(!isListSectionExpanded)}
-                    className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-[#2a2a3e] rounded-lg"
-                  >
-                    {isListSectionExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                  </button>
-                </div>
-
-                <div
-                  className={`transition-all duration-300 ease-in-out overflow-hidden ${
-                    isListSectionExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
-                  }`}
-                >
-                  <SearchBar
-                    searchTerm={searchTerm}
-                    onSearchChange={setSearchTerm}
-                    selectedMember={selectedMember}
-                    onMemberSelect={setSelectedMember}
-                    familyMembers={familyMembers}
+          <div className="space-y-4">
+            {activeTab === 'events' && (
+              <>
+                {filteredEvents.length === 0 ? (
+                  <EmptyState
+                    icon={Calendar}
+                    title="No events yet"
+                    description="Add your first event to get started!"
                   />
+                ) : (
+                  filteredEvents.map((event) => (
+                    <EventCard
+                      key={event.id}
+                      event={event}
+                      onToggleComplete={toggleComplete}
+                      onDelete={deleteItem}
+                      getMemberName={getMemberName}
+                      getMemberColor={getMemberColor}
+                      isCompleting={completingIds.has(event.id)}
+                      isDeleting={deletingIds.has(event.id)}
+                    />
+                  ))
+                )}
+              </>
+            )}
 
-                  <TabNavigation
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    eventCount={filteredEvents.length}
-                    reminderCount={filteredReminders.length}
+            {activeTab === 'reminders' && (
+              <>
+                {filteredReminders.length === 0 ? (
+                  <EmptyState
+                    icon={Bell}
+                    title="No reminders yet"
+                    description="Add your first reminder to get started!"
                   />
-
-                  <div className="mt-4 space-y-4">
-                    {activeTab === 'events' && (
-                      <>
-                        {filteredEvents.length === 0 ? (
-                          <EmptyState
-                            icon={Calendar}
-                            title="No events yet"
-                            description="Add your first event to get started!"
-                          />
-                        ) : (
-                          filteredEvents.map((event) => (
-                            <EventCard
-                              key={event.id}
-                              event={event}
-                              onToggleComplete={toggleComplete}
-                              onDelete={deleteItem}
-                              getMemberName={getMemberName}
-                              getMemberColor={getMemberColor}
-                              isCompleting={completingIds.has(event.id)}
-                              isDeleting={deletingIds.has(event.id)}
-                            />
-                          ))
-                        )}
-                      </>
-                    )}
-
-                    {activeTab === 'reminders' && (
-                      <>
-                        {filteredReminders.length === 0 ? (
-                          <EmptyState
-                            icon={Bell}
-                            title="No reminders yet"
-                            description="Add your first reminder to get started!"
-                          />
-                        ) : (
-                          filteredReminders.map((reminder) => (
-                            <ReminderCard
-                              key={reminder.id}
-                              reminder={reminder}
-                              onToggleComplete={toggleComplete}
-                              onDelete={deleteItem}
-                              getMemberName={getMemberName}
-                              getMemberColor={getMemberColor}
-                              isCompleting={completingIds.has(reminder.id)}
-                              isDeleting={deletingIds.has(reminder.id)}
-                            />
-                          ))
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+                ) : (
+                  filteredReminders.map((reminder) => (
+                    <ReminderCard
+                      key={reminder.id}
+                      reminder={reminder}
+                      onToggleComplete={toggleComplete}
+                      onDelete={deleteItem}
+                      getMemberName={getMemberName}
+                      getMemberColor={getMemberColor}
+                      isCompleting={completingIds.has(reminder.id)}
+                      isDeleting={deletingIds.has(reminder.id)}
+                    />
+                  ))
+                )}
+              </>
+            )}
           </div>
         )}
       </main>
@@ -951,19 +640,6 @@ const FamilyHubPWA = () => {
         onUpload={handleImageUpload}
         isUploading={isUploading}
       />
-
-      <SyncPanel
-        isOpen={showSyncPanel}
-        onClose={() => setShowSyncPanel(false)}
-        onSyncCalendar={handleSyncCalendar}
-        onSyncGmail={handleSyncGmail}
-        onEnableNotifications={handleEnableNotifications}
-        isSyncing={isSyncing}
-        notificationsEnabled={notificationsEnabled}
-        googleAccessToken={googleAccessToken}
-      />
-
-      <PWAInstallPrompt />
 
       {ToastComponent}
     </div>
